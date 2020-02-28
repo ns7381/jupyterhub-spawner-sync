@@ -12,6 +12,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	_ "github.com/go-sql-driver/mysql"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	//
@@ -51,17 +52,19 @@ func main() {
 		panic(err.Error())
 	}
 
-	db, err := sql.Open("mysql", "admin:admin-:=@tcp(jupyterhub-mysqlha-write.kubeflow:3306)/jupyterhub?charset=utf8")
+	db, err := sql.Open("mysql", "admin:admin@tcp(jupyterhub-mysqlha-write.kubeflow:3306)/jupyterhub?charset=utf8")
 	if err != nil {
 		panic(err)
 
 	}
 	namespace := "kubeflow"
 	for {
+		fmt.Printf("run.....")
 		rows, err := db.Query("SELECT id FROM servers")
 		if err != nil {
 			log.Fatal(err)
 		}
+		fmt.Printf("1.....")
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
