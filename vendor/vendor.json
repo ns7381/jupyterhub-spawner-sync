@@ -1,0 +1,17 @@
+{
+	"comment": "",
+	"ignore": "",
+	"package": [
+		{
+			"path": "github.com/go-sql-driver",
+			"revision": ""
+		},
+		{
+			"checksumSHA1": "CSe1LdJ5b6yTUTtyPTkvL/+MBr0=",
+			"path": "github.com/go-sql-driver/mysql",
+			"revision": "dd9d356b496cd5c37543d3dd0ffbef75714b88ec",
+			"revisionTime": "2020-02-25T15:24:38Z"
+		}
+	],
+	"rootPath": "github.com/ns7381/jupyterhub-spawner-sync"
+}
