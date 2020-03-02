@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	_ "github.com/go-sql-driver/mysql"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	//
@@ -25,11 +28,6 @@ import (
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/openstack"
 )
-
-
-type info struct {
-	pod_name string `json:"pod_name"`
-}
 
 func main() {
 	var kubeconfig *string
@@ -59,43 +57,41 @@ func main() {
 	}
 	namespace := "kubeflow"
 	for {
-		fmt.Printf("run.....")
+		fmt.Printf("run.....\n")
 		rows, err := db.Query("SELECT id FROM servers")
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("1.....")
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf("%s\n", name)
-			rows, err := db.Query("SELECT state FROM spawners WHERE server_id = ?", name)
+			rows, err := db.Query("SELECT user_id, state, `name` FROM spawners WHERE server_id = ?", name)
 			if err != nil {
 				log.Fatal(err)
 			}
 			for rows.Next() {
-				var state string
-				if err := rows.Scan(&state); err != nil {
+				var state, user_id, spawner_name string
+				if err := rows.Scan(&user_id, &state, &spawner_name); err != nil {
 					log.Fatal(err)
 				}
-				fmt.Printf("%s\n", state)
-				var i info
+				var i map[string]interface{}
 				if err := json.Unmarshal([]byte(state), &i); err != nil {
 					fmt.Println("ugh: ", err)
 				}
-				pod := i.pod_name
+				pod := i["pod_name"].(string)
 				_, err = clientset.CoreV1().Pods(namespace).Get(pod, metav1.GetOptions{})
 				if errors.IsNotFound(err) {
 					fmt.Printf("Pod %s in namespace %s not found\n", pod, namespace)
+					deleteHubSpawn(QueryUserName(db, user_id), spawner_name)
 				} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
 					fmt.Printf("Error getting pod %s in namespace %s: %v\n",
 						pod, namespace, statusError.ErrStatus.Message)
 				} else if err != nil {
-					panic(err.Error())
+					log.Fatal(err)
 				} else {
-					fmt.Printf("Found pod %s in namespace %s\n", pod, namespace)
+					//fmt.Printf("Found pod %s in namespace %s\n", pod, namespace)
 				}
 			}
 			if err := rows.Err(); err != nil {
@@ -107,6 +103,32 @@ func main() {
 		}
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func QueryUserName(DB *sql.DB, id string) string {
+	var user string   //用new()函数初始化一个结构体对象
+	row := DB.QueryRow("select `name` from users where id=?", id)
+	//row.scan中的字段必须是按照数据库存入字段的顺序，否则报错
+	if err := row.Scan(&user); err != nil {
+		fmt.Printf("scan failed, err:%v\n", err)
+	}
+	return user
+}
+
+func deleteHubSpawn(user string, server string) string {
+	url := "http://service/hub/api/users/"+user+"/server/"+server
+	payload := strings.NewReader("{\"delete\": true}")
+	req, _ := http.NewRequest("DELETE", url, payload)
+	fmt.Printf("Delete %s server %s.\n", user, server)
+	req.Header.Add("Authorization", "token xxx")
+
+	res, _ := http.DefaultClient.Do(req)
+
+	defer res.Body.Close()
+	body, _ := ioutil.ReadAll(res.Body)
+
+	fmt.Println(body)
+	return string(body)
 }
 
 func homeDir() string {
