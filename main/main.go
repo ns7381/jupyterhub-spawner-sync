@@ -50,14 +50,15 @@ func main() {
 		panic(err.Error())
 	}
 
-	db, err := sql.Open("mysql", "admin:admin@tcp(jupyterhub-mysqlha-write.kubeflow:3306)/jupyterhub?charset=utf8")
+	db, err := sql.Open("mysql", "admin:xxx@tcp(xxxx:3306)/jupyterhub?charset=utf8")
 	if err != nil {
 		panic(err)
 
 	}
 	namespace := "kubeflow"
+	var userMap map[string]string /*创建集合 */
+	userMap = make(map[string]string)
 	for {
-		fmt.Printf("run.....\n")
 		rows, err := db.Query("SELECT id FROM servers")
 		if err != nil {
 			log.Fatal(err)
@@ -72,26 +73,49 @@ func main() {
 				log.Fatal(err)
 			}
 			for rows.Next() {
-				var state, user_id, spawner_name string
+				var state, user_id, spawner_name sql.NullString
 				if err := rows.Scan(&user_id, &state, &spawner_name); err != nil {
 					log.Fatal(err)
 				}
 				var i map[string]interface{}
-				if err := json.Unmarshal([]byte(state), &i); err != nil {
-					fmt.Println("ugh: ", err)
+				if err := json.Unmarshal([]byte(state.String), &i); err != nil {
+					fmt.Println(state.String)
+					fmt.Println("json parse error: ", err)
+					continue
 				}
+
 				pod := i["pod_name"].(string)
-				_, err = clientset.CoreV1().Pods(namespace).Get(pod, metav1.GetOptions{})
+				podEntity, err := clientset.CoreV1().Pods(namespace).Get(pod, metav1.GetOptions{})
 				if errors.IsNotFound(err) {
 					fmt.Printf("Pod %s in namespace %s not found\n", pod, namespace)
-					deleteHubSpawn(QueryUserName(db, user_id), spawner_name)
+					user_name, ok :=  userMap[user_id.String]
+					if (ok) {
+						deleteHubSpawn(user_name, spawner_name.String)
+					} else {
+						userMap[user_id.String] = QueryUserName(db, user_id.String)
+						deleteHubSpawn(userMap[user_id.String], spawner_name.String)
+					}
 				} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
 					fmt.Printf("Error getting pod %s in namespace %s: %v\n",
 						pod, namespace, statusError.ErrStatus.Message)
 				} else if err != nil {
 					log.Fatal(err)
 				} else {
-					//fmt.Printf("Found pod %s in namespace %s\n", pod, namespace)
+					status := podEntity.Status.Phase
+					if status != "Running" {
+						fmt.Printf("Found %s pod %s\n", status, pod)
+						//fmt.Printf("Delete %s pod %s in namespace %s\n", status, pod, namespace)
+						//if err := clientset.CoreV1().Pods(namespace).Delete(pod, &metav1.DeleteOptions{}); err != nil {
+						//	log.Fatal(err)
+						//}
+						user_name, ok :=  userMap[user_id.String]
+						if (ok) {
+							deleteHubSpawn(user_name, spawner_name.String)
+						} else {
+							userMap[user_id.String] = QueryUserName(db, user_id.String)
+							deleteHubSpawn(userMap[user_id.String], spawner_name.String)
+						}
+					}
 				}
 			}
 			if err := rows.Err(); err != nil {
@@ -115,20 +139,27 @@ func QueryUserName(DB *sql.DB, id string) string {
 	return user
 }
 
-func deleteHubSpawn(user string, server string) string {
-	url := "http://service/hub/api/users/"+user+"/server/"+server
-	payload := strings.NewReader("{\"delete\": true}")
+func deleteHubSpawn(user string, server string) {
+	url := "http://com/hub/api/users/"+user+"/servers/"+server
+	payload := strings.NewReader("{\"remove\": true}")
 	req, _ := http.NewRequest("DELETE", url, payload)
 	fmt.Printf("Delete %s server %s.\n", user, server)
-	req.Header.Add("Authorization", "token xxx")
+	req.Header.Add("Authorization", "token ")
+	req.Header.Add("Content-Type", "application/json")
 
-	res, _ := http.DefaultClient.Do(req)
-
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	defer res.Body.Close()
-	body, _ := ioutil.ReadAll(res.Body)
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
-	fmt.Println(body)
-	return string(body)
+	fmt.Println(string(body))
 }
 
 func homeDir() string {
